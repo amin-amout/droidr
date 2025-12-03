@@ -1,0 +1,12 @@
+pvporcupine
+vosk
+sounddevice
+numpy
+pyyaml
+python-dotenv
+aiohttp
+groq
+google-generativeai
+webrtcvad
+piper-phonemize
+onnxruntime
