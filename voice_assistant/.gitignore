@@ -1,0 +1,26 @@
+# Virtual Environment
+venv/
+
+# Large Model Files
+resources/models/*.onnx
+resources/models/*.onnx.json
+resources/models/*.tflite
+resources/models/vosk-model-*/
+bin/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment Variables (contains API keys)
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -32,7 +32,7 @@ class AudioManager:
         """Blocking read of the next audio chunk."""
         return self.input_queue.get()
 
-    def play_audio(self, audio_data: bytes):
+    def play_audio(self, audio_data: bytes, sample_rate: int = None):
         """Plays raw audio data."""
         # Simple blocking playback for now. 
         # For a real async pipeline, we'd want a separate output stream/thread.
@@ -41,7 +41,10 @@ class AudioManager:
         
         # Convert bytes back to numpy for sounddevice
         audio_np = np.frombuffer(audio_data, dtype=np.int16)
-        sd.play(audio_np, self.sample_rate, blocking=True)
+        # Use provided sample rate or default to instance sample rate
+        playback_rate = sample_rate if sample_rate else self.sample_rate
+        sd.play(audio_np, playback_rate, blocking=True)
+        sd.wait()  # Ensure audio finishes playing
 
     def stop(self):
         if self.stream:

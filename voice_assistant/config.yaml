@@ -1,10 +1,10 @@
 # Voice Assistant Configuration
 
 system:
-  wake_word_engine: "porcupine" # Options: porcupine, openwakeword
+  wake_word_engine: "openwakeword" # Options: porcupine, openwakeword
   stt_engine: "vosk"
   tts_engine: "piper"
-  llm_provider: "lan" # Options: lan, groq, gemini
+  llm_provider: "groq" # Options: lan, groq, gemini
 
 audio:
   input_device_index: null # Auto-detect
@@ -13,13 +13,12 @@ audio:
   channels: 1
 
 wakeword:
+  openwakeword:
+    model_paths: ["resources/models/hey_jarvis_v0.1.tflite"]
+    inference_framework: "tflite"
   porcupine:
     access_key: "${PORCUPINE_ACCESS_KEY}"
     keywords: ["jarvis"]
-  openwakeword:
-    model_paths: ["resources/models/alexa_v0.1.tflite"]
-    inference_framework: "tflite"
-
 stt:
   vosk:
     model_path: "resources/models/vosk-model-small-en-us-0.15"
@@ -27,15 +26,16 @@ stt:
 tts:
   piper:
     model_path: "resources/models/en_US-lessac-medium.onnx"
+    piper_binary: "bin/piper/piper"
     voice: "en_US-lessac-medium"
 
 llm:
+  groq:
+    api_key: "${GROQ_API_KEY}"
+    model: "llama-3.3-70b-versatile"  # Updated to current model
   lan:
     base_url: "http://localhost:11434" # Ollama default
     model: "llama3"
-  groq:
-    api_key: "${GROQ_API_KEY}"
-    model: "llama3-8b-8192"
   gemini:
     api_key: "${GEMINI_API_KEY}"
     model: "gemini-1.5-flash"

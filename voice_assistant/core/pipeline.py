@@ -5,13 +5,14 @@ import asyncio
 from dotenv import load_dotenv
 
 from .audio import AudioManager
-from ..modules.wakeword.porcupine import PorcupineWakeWord
-from ..modules.wakeword.openwakeword import OpenWakeWord
-from ..modules.stt.vosk_stt import VoskSTT
-from ..modules.llm.lan_client import LanLLM
-from ..modules.llm.groq_client import GroqLLM
-from ..modules.llm.gemini_client import GeminiLLM
-from ..modules.tts.piper_tts import PiperTTS
+from modules.wakeword.porcupine import PorcupineWakeWord
+from modules.wakeword.openwakeword import OpenWakeWord  # Changed from OpenWakeWordDetector
+from modules.stt.vosk_stt import VoskSTT
+from modules.tts.piper_tts import PiperTTS
+from modules.llm.lan_client import LanLLM  # Changed from lan_llm
+from modules.llm.groq_client import GroqLLM
+from modules.llm.gemini_client import GeminiLLM
+
 
 class PipelineManager:
     def __init__(self, config_path: str):
@@ -33,7 +34,7 @@ class PipelineManager:
                 keywords=self.config['wakeword']['porcupine']['keywords']
             )
         elif ww_engine == 'openwakeword':
-            self.wakeword = OpenWakeWord(
+            self.wakeword = OpenWakeWord(  # Changed from OpenWakeWord (it was already wrong on line 40)
                 model_paths=self.config['wakeword']['openwakeword']['model_paths']
             )
         
@@ -44,7 +45,8 @@ class PipelineManager:
 
         # Initialize TTS
         self.tts = PiperTTS(
-            model_path=self.config['tts']['piper']['model_path']
+            model_path=self.config['tts']['piper']['model_path'],
+            piper_binary=self.config['tts']['piper'].get('piper_binary', 'piper')
         )
 
         # Initialize LLM
@@ -111,7 +113,15 @@ class PipelineManager:
         # We need to bridge the sync/async gap depending on the LLM provider
         # Our LLM classes have generate_async
         
-        response_stream = self.llm.generate_async(user_text)
+        # Add system prompt to guide the assistant's behavior
+        system_prompt = """You are Jarvis, a helpful voice assistant. You provide concise, friendly, and direct answers. 
+When asked how you are or about your feelings, simply respond positively and move on (e.g., "I'm doing well, thanks for asking!").
+Keep responses brief and to the point since they will be spoken aloud. Avoid mentioning that you're an AI or language model unless specifically asked about your nature."""
+        
+        # Combine system prompt with user query
+        full_prompt = f"{system_prompt}\n\nUser: {user_text}\nAssistant:"
+        
+        response_stream = self.llm.generate_async(full_prompt)
         
         # 4. TTS & Playback
         # We need to feed the response stream to TTS.
@@ -129,11 +139,16 @@ class PipelineManager:
         print(f"AI: {full_response}")
         
         # Synthesize
+        print("Synthesizing speech...")
         audio_stream = self.tts.synthesize(iter([full_response]))
         
-        # Play
+        # Collect all audio chunks
+        all_audio = bytearray()
         for audio_chunk in audio_stream:
-            self.audio.play_audio(audio_chunk)
+            all_audio.extend(audio_chunk)
+        
+        # Play
+        self.audio.play_audio(bytes(all_audio), sample_rate=22050)
 
     def stop(self):
         self.audio.stop()

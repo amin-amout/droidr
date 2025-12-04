@@ -12,64 +12,48 @@ class PiperTTS(TTSBase):
         """
         Streams text to piper subprocess and yields raw audio bytes.
         """
-        # Start piper process
-        # We use --output-raw to get raw PCM data (16-bit, mono, 22050Hz usually)
+        # Collect all text first
+        full_text = ""
+        for text_chunk in text_stream:
+            if text_chunk.strip():
+                full_text += text_chunk + " "
+        
+        if not full_text.strip():
+            return
+        
+        # Run piper as a simple subprocess with input/output
         cmd = [
             self.piper_binary,
             "--model", self.model_path,
             "--output-raw"
         ]
         
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0 # Unbuffered
-        )
-
         try:
-            # We need a separate thread or non-blocking way to write to stdin
-            # while reading from stdout to avoid deadlocks.
-            # However, for simplicity in this synchronous generator, we will 
-            # write chunk by chunk. Ideally, Piper should be fed sentences.
+            # Run piper with the full text as input
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0
+            )
             
-            # NOTE: A robust implementation would use asyncio subprocesses.
-            # For this MVP, we'll assume text_stream yields complete sentences
-            # and we write them one by one.
+            # Write text and close stdin to signal EOF
+            process.stdin.write(full_text.encode('utf-8'))
+            process.stdin.close()
             
-            for text_chunk in text_stream:
-                if not text_chunk.strip():
-                    continue
-                    
-                # Write text to piper
-                process.stdin.write(text_chunk.encode('utf-8') + b'\n')
-                process.stdin.flush()
-                
-                # Read audio output. 
-                # Piper outputs audio as it generates. We need to read continuously.
-                # This is tricky with blocking I/O. 
-                # A better approach for the MVP:
-                # Use the python bindings or run a new process per sentence if latency allows.
-                # Running a persistent process is better but harder to manage synchronously.
-                
-                # Let's try reading a chunk. 
-                # WARNING: This might block if piper doesn't output immediately.
-                # For safety in this MVP, we might want to just read until we get data.
-                
-                while True:
-                    # Read 1024 bytes
-                    data = process.stdout.read(1024)
-                    if not data:
-                        break
-                    yield data
-                    # If we read less than requested, maybe it's done for now? 
-                    # No, pipe might just be empty.
-                    
-        except BrokenPipeError:
-            pass
-        finally:
-            if process.stdin:
-                process.stdin.close()
-            process.terminate()
+            # Read all output
+            while True:
+                data = process.stdout.read(1024)
+                if not data:
+                    break
+                yield data
+            
+            # Wait for process to finish
             process.wait()
+            
+        except Exception as e:
+            print(f"Error in TTS: {e}")
+            if process:
+                process.terminate()
+                process.wait()
