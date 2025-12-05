@@ -1,29 +1,53 @@
 import yaml
 import os
+import re
 import numpy as np
 import asyncio
+import logging
 from dotenv import load_dotenv
 
 from .audio import AudioManager
+from .session import ConversationSession
 from modules.wakeword.porcupine import PorcupineWakeWord
-from modules.wakeword.openwakeword import OpenWakeWord  # Changed from OpenWakeWordDetector
+from modules.wakeword.openwakeword import OpenWakeWord
 from modules.stt.vosk_stt import VoskSTT
 from modules.tts.piper_tts import PiperTTS
-from modules.llm.lan_client import LanLLM  # Changed from lan_llm
+from modules.llm.lan_client import LanLLM
 from modules.llm.groq_client import GroqLLM
 from modules.llm.gemini_client import GeminiLLM
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class PipelineManager:
     def __init__(self, config_path: str):
         load_dotenv()
+        
         with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
+            config_content = f.read()
+            # Replace ${VAR} with environment variable values
+            config_content = re.sub(
+                r'\$\{([^}]+)\}',
+                lambda m: os.getenv(m.group(1), ''),
+                config_content
+            )
+            self.config = yaml.safe_load(config_content)
+
+        # Initialize Session Manager
+        exit_phrases = self.config.get('session', {}).get('exit_phrases', [
+            "stop listening", "go to sleep", "exit", "goodbye", "bye", "stop"
+        ])
+        self.session = ConversationSession(
+            max_memory_size=self.config.get('session', {}).get('max_memory_turns', 10),
+            exit_phrases=exit_phrases
+        )
 
         # Initialize Audio
         self.audio = AudioManager(
             sample_rate=self.config['audio']['sample_rate'],
-            channels=self.config['audio']['channels']
+            channels=self.config['audio']['channels'],
+            noise_gate_threshold=self.config['audio'].get('noise_gate_threshold', 500)
         )
 
         # Initialize Wake Word
@@ -68,79 +92,201 @@ class PipelineManager:
             )
 
     async def run(self):
-        print("Starting Voice Assistant...")
+        """
+        Main event loop with session-aware logic.
+        - Wait for wake word when session is inactive
+        - Listen continuously when session is active
+        - Exit session on exit phrases
+        """
+        logger.info("Starting Voice Assistant...")
         self.audio.start_input_stream()
         
-        print("Listening for wake word...")
         while True:
-            # 1. Wake Word Detection
+            if not self.session.active:
+                # Dormant mode: wait for wake word
+                logger.info("Listening for wake word...")
+                await self.wait_for_wake_word()
+                self.session.activate()
+                logger.info("Session activated! Listening continuously...")
+                # Optional: speak a greeting
+                await self.speak("Yes? How can I help you?")
+            else:
+                # Active session: listen for user input
+                await self.handle_interaction()
+
+    async def wait_for_wake_word(self) -> None:
+        """
+        Listen for wake word detection.
+        Blocks until wake word is detected.
+        """
+        # Clear any buffered audio from previous session
+        self.clear_audio_buffer()
+        
+        while True:
             chunk_bytes = self.audio.read_chunk()
-            # Convert to numpy for wake word engine
             pcm = np.frombuffer(chunk_bytes, dtype=np.int16)
             
             keyword_index = self.wakeword.process(pcm)
             if keyword_index >= 0:
-                print("Wake word detected!")
-                await self.handle_interaction()
+                logger.info("Wake word detected!")
+                return
+    
+    def clear_audio_buffer(self) -> None:
+        """
+        Clear buffered audio from the input queue.
+        Useful when transitioning back to wake word detection.
+        """
+        try:
+            # Drain the queue without blocking
+            while not self.audio.input_queue.empty():
+                self.audio.input_queue.get_nowait()
+            logger.debug("Audio buffer cleared")
+        except Exception as e:
+            logger.debug(f"Error clearing audio buffer: {e}")
 
     async def handle_interaction(self):
-        # 2. STT (Listen until silence)
-        print("Listening for command...")
-        # We need a generator that yields audio chunks from the audio manager
-        # until some condition (silence) is met.
-        # For MVP, let's just record for 5 seconds fixed, or use a simple VAD loop.
+        """
+        Handle a single user interaction within an active session.
+        - Listen and transcribe
+        - Check for exit phrases
+        - Get LLM response with memory context
+        - Speak response
+        - Update memory
+        """
+        # Listen and transcribe
+        user_text = await self.listen_and_transcribe()
         
-        # Quick hack: Record 3 seconds of audio for STT
-        # In production, use webrtcvad to detect end of speech.
+        if not user_text:
+            logger.warning("No speech detected, continuing...")
+            return
+        
+        logger.info(f"User said: {user_text}")
+        
+        # Check for exit phrases
+        if self.session.should_exit(user_text):
+            logger.info("Exit phrase detected, ending session...")
+            await self.speak("Goodbye! Let me know if you need anything.")
+            self.session.deactivate()
+            return
+        
+        # Add user message to memory
+        self.session.add_to_memory("user", user_text)
+        
+        # Get LLM response with conversation history
+        logger.info("Generating response...")
+        response = await self.call_llm_with_memory(user_text)
+        
+        if not response:
+            logger.error("No response from LLM")
+            return
+        
+        logger.info(f"AI: {response}")
+        
+        # Add assistant response to memory
+        self.session.add_to_memory("assistant", response)
+        
+        # Speak response
+        await self.speak(response)
+        
+        # Longer pause after speaking to ensure:
+        # 1. Audio playback is fully complete
+        # 2. User has time to think
+        # 3. No audio feedback/echo
+        await asyncio.sleep(1.5)
+
+    async def listen_and_transcribe(self) -> str:
+        """
+        Listen for user speech and transcribe it.
+        Records for a configurable duration (default 5 seconds).
+        
+        TODO: Implement proper VAD (Voice Activity Detection) using webrtcvad
+        to detect end of speech dynamically.
+        
+        Returns:
+            Transcribed text
+        """
+        logger.info("Listening for command...")
+        
+        # Record audio for configurable duration (default 5 seconds)
+        # In production, use VAD to detect speech end
         audio_buffer = []
-        for _ in range(0, int(16000 / 512 * 3)): # 3 seconds
+        duration_seconds = self.config.get('audio', {}).get('listen_duration', 5)
+        chunks_needed = int(self.config['audio']['sample_rate'] / 512 * duration_seconds)
+        
+        # Collect all audio first
+        for _ in range(chunks_needed):
             audio_buffer.append(self.audio.read_chunk())
-            
-        # Transcribe
+        
+        # Play a friendly beep to indicate listening has stopped
+        if self.config.get('audio', {}).get('beep_on_listen_end', True):
+            self.audio.play_beep()
+        
+        # Add silence padding at the end to help Vosk finalize properly
+        silence_chunks = 10  # ~200ms of silence
+        silence = bytes(1024)  # 512 samples * 2 bytes = 1024 bytes of silence
+        for _ in range(silence_chunks):
+            audio_buffer.append(silence)
+        
+        # Transcribe all at once
         text_stream = self.stt.stream_transcribe(iter(audio_buffer))
         user_text = ""
         for text in text_stream:
             user_text += text + " "
         
-        user_text = user_text.strip()
-        print(f"User said: {user_text}")
-        
-        if not user_text:
-            return
+        return user_text.strip()
 
-        # 3. LLM
-        print("Generating response...")
-        # We need to bridge the sync/async gap depending on the LLM provider
-        # Our LLM classes have generate_async
+    async def call_llm_with_memory(self, user_input: str) -> str:
+        """
+        Call LLM with conversation history and current input.
         
-        # Add system prompt to guide the assistant's behavior
+        Args:
+            user_input: Latest user message
+            
+        Returns:
+            LLM response text
+        """
+        # Build prompt with system message and conversation history
         system_prompt = """You are Jarvis, a helpful voice assistant. You provide concise, friendly, and direct answers. 
 When asked how you are or about your feelings, simply respond positively and move on (e.g., "I'm doing well, thanks for asking!").
-Keep responses brief and to the point since they will be spoken aloud. Avoid mentioning that you're an AI or language model unless specifically asked about your nature."""
+Keep responses brief and to the point since they will be spoken aloud. Avoid mentioning that you're an AI or language model unless specifically asked about your nature.
+You can remember context from earlier in the conversation."""
         
-        # Combine system prompt with user query
-        full_prompt = f"{system_prompt}\n\nUser: {user_text}\nAssistant:"
+        # Get conversation history
+        history = self.session.get_memory_for_llm()
         
+        # Build full prompt
+        if history:
+            # Include conversation context
+            context = self.session.get_memory_context()
+            full_prompt = f"{system_prompt}\n\nPrevious conversation:\n{context}\n\nUser: {user_input}\nAssistant:"
+        else:
+            # First message in session
+            full_prompt = f"{system_prompt}\n\nUser: {user_input}\nAssistant:"
+        
+        # Call LLM
         response_stream = self.llm.generate_async(full_prompt)
         
-        # 4. TTS & Playback
-        # We need to feed the response stream to TTS.
-        # TTS.synthesize takes an iterator of strings.
-        # We can create an async generator adapter if needed, 
-        # but PiperTTS implementation above was sync.
-        # Let's collect the response for the MVP to avoid complex async/sync bridging in this step
-        # OR better, iterate async and feed to TTS chunk by chunk.
-        
+        # Collect full response
         full_response = ""
         async for chunk in response_stream:
             full_response += chunk
-            # Optimization: We could feed 'chunk' to TTS here if it formed a complete sentence.
         
-        print(f"AI: {full_response}")
+        return full_response.strip()
+
+    async def speak(self, text: str) -> None:
+        """
+        Synthesize and play speech.
+        
+        Args:
+            text: Text to speak
+        """
+        if not text:
+            return
+        
+        logger.info("Synthesizing speech...")
         
         # Synthesize
-        print("Synthesizing speech...")
-        audio_stream = self.tts.synthesize(iter([full_response]))
+        audio_stream = self.tts.synthesize(iter([text]))
         
         # Collect all audio chunks
         all_audio = bytearray()
