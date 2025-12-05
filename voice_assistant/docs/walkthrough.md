@@ -41,6 +41,28 @@ unzip vosk-model-small-en-us-0.15.zip
 rm vosk-model-small-en-us-0.15.zip
 ```
 
+**Note:** The small model is lightweight and works well on low-resource devices like Orange Pi, but has lower accuracy. For better transcription accuracy, you can upgrade to larger models:
+
+**Optional: Larger Models for Better Accuracy**
+```bash
+# Medium model (1.4GB) - Good balance between speed and accuracy
+wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.42-gigaspeech.zip
+unzip vosk-model-en-us-0.42-gigaspeech.zip
+rm vosk-model-en-us-0.42-gigaspeech.zip
+
+# OR Large model (1.8GB) - Best accuracy, slower
+wget https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip
+unzip vosk-model-en-us-0.22.zip
+rm vosk-model-en-us-0.22.zip
+
+# Then update config.yaml with the new model path
+```
+
+**Model Comparison:**
+- **small (0.15)**: 40MB, fast, ~75% accuracy, good for low-resource devices
+- **medium (0.42)**: 1.4GB, medium speed, ~85% accuracy, balanced option
+- **large (0.22)**: 1.8GB, slower, ~95% accuracy, best for accuracy
+
 ### Download Piper TTS Binary and Voice Model
 Download the Piper binary for your system architecture and the "Lessac" voice (medium quality):
 
@@ -105,3 +127,6 @@ python3.10 main.py
 ## Troubleshooting
 - **Audio Device Error:** If `sounddevice` fails, check `aplay -l` and `arecord -l` to see if your devices are detected. You may need to specify device indices in `config.yaml`.
 - **Latency:** If STT is slow, ensure you are using the `small` Vosk model.
+- **Poor Transcription Accuracy:** The small Vosk model may misunderstand words. Consider upgrading to the medium or large model (see Vosk Model section above). Trade-off: larger models = better accuracy but slower processing.
+- **Words Getting Cut Off:** Increase `listen_duration` in `config.yaml` (default: 7 seconds).
+- **Too Much Background Noise:** Lower `noise_gate_threshold` in `config.yaml` (default: 500, try 300-400).

@@ -11,6 +11,9 @@ audio:
   output_device_index: null # Auto-detect
   sample_rate: 16000
   channels: 1
+  listen_duration: 7  # Seconds to record for each user input (increase if getting cut off)
+  noise_gate_threshold: 500  # Amplitude threshold for noise reduction (100-1000, lower = more sensitive)
+  beep_on_listen_end: true  # Play a friendly beep when done listening (before processing)
 
 wakeword:
   openwakeword:
@@ -22,6 +25,10 @@ wakeword:
 stt:
   vosk:
     model_path: "resources/models/vosk-model-small-en-us-0.15"
+    # For better accuracy, use a larger model:
+    # - vosk-model-en-us-0.22 (1.8GB, best accuracy, slower)
+    # - vosk-model-en-us-0.42-gigaspeech (1.4GB, good balance)
+    # Download: https://alphacephei.com/vosk/models/
 
 tts:
   piper:
@@ -39,3 +46,13 @@ llm:
   gemini:
     api_key: "${GEMINI_API_KEY}"
     model: "gemini-1.5-flash"
+
+session:
+  max_memory_turns: 10  # Number of conversation turns to remember
+  exit_phrases:
+    - "stop listening"
+    - "go to sleep"
+    - "exit"
+    - "goodbye"
+    - "bye"
+    - "stop"
