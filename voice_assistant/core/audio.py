@@ -128,3 +128,27 @@ class AudioManager:
         if self.stream:
             self.stream.stop()
             self.stream.close()
+
+    def record(self, duration: float) -> np.ndarray:
+        """
+        Record audio for a fixed duration and return as a normalized mono numpy array.
+
+        Args:
+            duration: Recording duration in seconds
+
+        Returns:
+            Numpy array of float32 samples in range [-1.0, 1.0]
+        """
+        # Use sounddevice.rec for a simple blocking recording
+        frames = int(self.sample_rate * float(duration))
+        audio = sd.rec(frames, samplerate=self.sample_rate, channels=self.channels, dtype='int16')
+        sd.wait()
+
+        # Convert to mono if necessary
+        if audio.ndim > 1 and audio.shape[1] > 1:
+            audio = audio.mean(axis=1)
+
+        # Ensure dtype and normalize to [-1, 1]
+        audio = audio.astype(np.float32) / 32767.0
+
+        return audio

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from .audio import AudioManager
 from .session import ConversationSession
 from .intents import detect_local_intent, handle_local_intent
+from .speaker_id import SpeakerIdentifier
 from modules.wakeword.porcupine import PorcupineWakeWord
 from modules.wakeword.openwakeword import OpenWakeWord
 from modules.stt.vosk_stt import VoskSTT
@@ -49,6 +50,14 @@ class PipelineManager:
             sample_rate=self.config['audio']['sample_rate'],
             channels=self.config['audio']['channels'],
             noise_gate_threshold=self.config['audio'].get('noise_gate_threshold', 500)
+        )
+
+        # Initialize Speaker Identification (optional)
+        speaker_cfg = self.config.get('speaker', {})
+        self.speaker_id = SpeakerIdentifier(
+            model_path=speaker_cfg.get('model_path'),
+            db_path=speaker_cfg.get('db_path', 'speakers.db'),
+            similarity_threshold=speaker_cfg.get('similarity_threshold', 0.75)
         )
 
         # Initialize Wake Word
@@ -109,8 +118,37 @@ class PipelineManager:
                 await self.wait_for_wake_word()
                 self.session.activate()
                 logger.info("Session activated! Listening continuously...")
-                # Optional: speak a greeting
-                await self.speak("Yes? How can I help you?")
+                # After wake word, try to identify speaker (short sample)
+                    try:
+                        # Record a snippet for identification. Duration configurable via config.yaml
+                        identify_duration = float(self.config.get('speaker', {}).get('identify_duration', 8.0))
+                        sample = self.audio.record(duration=identify_duration)
+                        name, score = self.speaker_id.identify_with_score(sample, sample_rate=self.audio.sample_rate)
+                        
+                        # If score is confidently above threshold
+                        if score >= self.speaker_id.similarity_threshold:
+                            speaker_name = name
+                        # If score is near threshold, ask for confirmation
+                        elif score > 0 and self.speaker_id.accept_near_threshold and score + self.speaker_id.near_margin >= self.speaker_id.similarity_threshold:
+                            # Ask confirmation
+                            await self.speak(f"I think you are {name}. Is that correct?")
+                            # Record short yes/no response
+                            confirm_audio = self.audio.record(duration=2.0)
+                            confirm_text = await self.stt.transcribe_from_audio(confirm_audio)
+                            if confirm_text and any(w in confirm_text.lower() for w in ["yes", "yep", "correct", "right", "oui"]):
+                                speaker_name = name
+                            else:
+                                speaker_name = "unknown"
+                        else:
+                            speaker_name = "unknown"
+                    except Exception:
+                        speaker_name = "unknown"
+
+                    # Personalized greeting
+                    if speaker_name and speaker_name != "unknown":
+                        await self.speak(f"Hello {speaker_name}, how can I help you?")
+                    else:
+                        await self.speak("Yes? How can I help you?")
             else:
                 # Active session: listen for user input
                 await self.handle_interaction()

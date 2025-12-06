@@ -10,3 +10,7 @@ google-generativeai
 webrtcvad
 piper-phonemize
 onnxruntime
+# Speaker recognition dependencies
+resemblyzer  # Lightweight speaker embedding model (offline)
+soundfile    # Audio file I/O for enrollment
+librosa      # Fallback for MFCC extraction

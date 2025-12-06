@@ -56,3 +56,8 @@ session:
     - "goodbye"
     - "bye"
     - "stop"
+
+speaker:
+  db_path: "speakers.db"
+  similarity_threshold: 0.75
+  identify_duration: 8.0  # Seconds to record for live identification after wake word
