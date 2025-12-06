@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from .audio import AudioManager
 from .session import ConversationSession
+from .intents import detect_local_intent, handle_local_intent
 from modules.wakeword.porcupine import PorcupineWakeWord
 from modules.wakeword.openwakeword import OpenWakeWord
 from modules.stt.vosk_stt import VoskSTT
@@ -161,6 +162,22 @@ class PipelineManager:
             return
         
         logger.info(f"User said: {user_text}")
+        
+        # Check for local intents first (time, weather, etc.)
+        local_intent = detect_local_intent(user_text)
+        if local_intent:
+            logger.info(f"Local intent detected: {local_intent['intent']}")
+            response = handle_local_intent(local_intent)
+            logger.info(f"AI (local): {response}")
+            
+            # Add to memory for context continuity
+            self.session.add_to_memory("user", user_text)
+            self.session.add_to_memory("assistant", response)
+            
+            # Speak response directly without calling LLM
+            await self.speak(response)
+            await asyncio.sleep(1.5)
+            return
         
         # Check for exit phrases
         if self.session.should_exit(user_text):
