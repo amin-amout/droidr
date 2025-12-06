@@ -471,54 +471,46 @@ if __name__ == "__main__":
     parser.add_argument("--reprocess", action="store_true", help="Recompute averaged embeddings from samples")
     
     args = parser.parse_args()
-    
+
     # Initialize speaker identifier
     speaker_id = SpeakerIdentifier(similarity_threshold=args.threshold)
-    
+
+    # CLI actions
     if args.enroll and args.audio:
         print(f"Enrolling {args.enroll} from {args.audio}...")
         success = speaker_id.enroll_user(args.enroll, audio_file=args.audio)
         print("Success!" if success else "Failed!")
-    
+
     elif args.list:
         users = speaker_id.list_users()
         print(f"Enrolled speakers ({len(users)}):")
         for user in users:
             print(f"  - {user}")
-    
+
     elif args.delete:
         success = speaker_id.delete_user(args.delete)
         print(f"Deleted {args.delete}" if success else f"Failed to delete {args.delete}")
-    
+
     elif args.identify and args.audio:
         audio_data, sr = sf.read(args.audio)
         name, score = speaker_id.identify_with_score(audio_data, sr)
         print(f"Identified speaker: {name} (score: {score:.3f})")
 
-    elif args.threshold:
-        # Allow updating threshold via CLI for quick testing
-        speaker_id.similarity_threshold = args.threshold
-        print(f"Threshold set to {args.threshold}")
+    elif args.dump_embeddings:
+        out = speaker_id.dump_embeddings(args.dump_embeddings)
+        print(f"Embeddings dumped to {out}")
+
+    elif args.reprocess:
+        ok = speaker_id.reprocess_embeddings()
+        print("Reprocessed embeddings" if ok else "Reprocess failed")
 
     elif args.enroll and not args.audio:
         print("--enroll requires --audio <path> to enroll from a file")
 
-    elif args.list:
-        # already handled above
-        pass
+    elif args.threshold is not None:
+        # Allow updating threshold via CLI for quick testing
+        speaker_id.similarity_threshold = args.threshold
+        print(f"Threshold set to {args.threshold}")
 
-    # Additional tools
-    parser.add_argument("--dump-embeddings", type=str, help="Dump speaker embeddings to file")
-    parser.add_argument("--reprocess", action="store_true", help="Recompute averaged embeddings from samples")
-    
     else:
         parser.print_help()
-
-    # Handle additional tools
-    if args.dump_embeddings:
-        out = speaker_id.dump_embeddings(args.dump_embeddings)
-        print(f"Embeddings dumped to {out}")
-
-    if args.reprocess:
-        ok = speaker_id.reprocess_embeddings()
-        print("Reprocessed embeddings" if ok else "Reprocess failed")

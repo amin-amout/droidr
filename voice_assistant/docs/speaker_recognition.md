@@ -101,23 +101,31 @@ class PipelineManager:
 
 ## Command-Line Tools
 
-### Enroll Users
+### Command-Line Tools
+
+Use these commands from the project root. If you see import errors, run with `PYTHONPATH=.` as shown.
 
 ```bash
-# Interactive enrollment
-python examples/speaker_integration.py enroll
+# Interactive enrollment (recommended)
+PYTHONPATH=. python -m examples.speaker_integration enroll
 
-# From audio file
+# Enroll from an audio file
 python -m core.speaker_id --enroll "Dad" --audio recordings/dad.wav
 
 # List enrolled users
 python -m core.speaker_id --list
 
-# Delete user
+# Delete a user
 python -m core.speaker_id --delete "Dad"
 
-# Test identification
-python -m core.speaker_id --identify --audio test_audio.wav
+# Identify a test audio file and print score
+python -m core.speaker_id --identify test_audio.wav
+
+# Dump embeddings to a pickle file for inspection
+python -m core.speaker_id --dump-embeddings embeddings.pkl
+
+# Recompute averaged embeddings from stored enrollment samples
+python -m core.speaker_id --reprocess
 ```
 
 ## Recording Audio Samples for Enrollment
